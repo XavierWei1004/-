@@ -5,7 +5,7 @@ async function loadData(){
 }
 
 function uniq(arr){
-  return Array.from(new Set(arr.filter(Boolean)));
+  return Array.from(new Set(arr.map(x=>String(x||'').trim()).filter(Boolean)));
 }
 
 function el(tag, attrs={}, children=[]){
@@ -20,35 +20,29 @@ function el(tag, attrs={}, children=[]){
   return e;
 }
 
-function renderOptions(select, values, placeholder){
-  select.innerHTML='';
-  select.appendChild(el('option',{value:'',text:placeholder}));
+function renderDatalist(datalist, values){
+  datalist.innerHTML='';
   for(const v of values){
-    select.appendChild(el('option',{value:v,text:v}));
+    datalist.appendChild(el('option',{value:v}));
   }
 }
 
-function matchItem(item, q){
-  if(!q) return true;
-  q = q.trim();
-  if(!q) return true;
-  const s = `${item.region} ${item.province} ${item.city} ${(item.phones||[]).join(' ')}`;
-  return s.toLowerCase().includes(q.toLowerCase());
+function norm(s){
+  return String(s||'').trim();
 }
 
-function filterItems(data, prov, city, q){
+function filterItems(data, prov, city){
+  prov = norm(prov);
+  city = norm(city);
   return data.filter(it => {
-    if(prov && it.province !== prov) return false;
-    if(city && it.city !== city) return false;
-    if(!matchItem(it,q)) return false;
+    if(prov && norm(it.province) !== prov) return false;
+    if(city && norm(it.city) !== city) return false;
     return true;
   });
 }
 
 function copyText(t){
-  navigator.clipboard?.writeText(t).then(()=>{
-    // ok
-  }).catch(()=>{
+  navigator.clipboard?.writeText(t).catch(()=>{
     const ta = document.createElement('textarea');
     ta.value=t; document.body.appendChild(ta);
     ta.select(); document.execCommand('copy');
@@ -59,6 +53,12 @@ function copyText(t){
 function renderResults(list){
   const root = document.querySelector('#results');
   root.innerHTML='';
+
+  if(!list.length){
+    root.appendChild(el('div',{class:'card'},[el('div',{text:'未查询到匹配结果，请检查省份/城市是否正确。'})]));
+    return;
+  }
+
   for(const it of list){
     const phones = (it.phones||[]).map(p => {
       const a = el('a',{href:`tel:${p}`,text:p});
@@ -68,61 +68,67 @@ function renderResults(list){
 
     root.appendChild(
       el('div',{class:'card'},[
-        el('div',{class:'title'},[
-          el('h3',{text:`${it.province} · ${it.city}`}),
-          el('span',{class:'badge',text: it.region ? `大区：${it.region}` : ''}),
-        ]),
+        el('h3',{text:`${it.province} · ${it.city}${it.region ? `（${it.region}）` : ''}`}),
         el('div',{class:'phones'}, phones)
       ])
     );
   }
 }
 
-function setCount(n){
-  document.querySelector('#count').textContent = `匹配结果：${n} 条`;
+function setHint(text){
+  document.querySelector('#count').textContent = text || '';
 }
 
 (async function main(){
   const data = await loadData();
 
-  const provinceSel = document.querySelector('#province');
-  const citySel = document.querySelector('#city');
-  const qInput = document.querySelector('#q');
+  const provinceInput = document.querySelector('#province');
+  const cityInput = document.querySelector('#city');
+  const provinceList = document.querySelector('#provinceList');
+  const cityList = document.querySelector('#cityList');
+  const searchBtn = document.querySelector('#search');
   const resetBtn = document.querySelector('#reset');
 
   const provinces = uniq(data.map(x=>x.province)).sort((a,b)=>a.localeCompare(b,'zh'));
-  renderOptions(provinceSel, provinces, '全部省份');
-  renderOptions(citySel, [], '全部城市');
+  renderDatalist(provinceList, provinces);
 
   function refreshCities(){
-    const prov = provinceSel.value;
-    const cities = uniq(data.filter(x=>!prov || x.province===prov).map(x=>x.city))
+    const prov = norm(provinceInput.value);
+    const cities = uniq(data.filter(x=>!prov || norm(x.province)===prov).map(x=>x.city))
       .sort((a,b)=>a.localeCompare(b,'zh'));
-    const cur = citySel.value;
-    renderOptions(citySel, cities, '全部城市');
-    if(cities.includes(cur)) citySel.value = cur;
+    renderDatalist(cityList, cities);
   }
 
-  function refresh(){
-    const prov = provinceSel.value;
-    const city = citySel.value;
-    const q = qInput.value;
-    const list = filterItems(data, prov, city, q);
+  function runSearch(){
+    const prov = provinceInput.value;
+    const city = cityInput.value;
+
+    if(!norm(prov) && !norm(city)){
+      setHint('请输入省份或城市后再查询');
+      renderResults([]);
+      return;
+    }
+
+    const list = filterItems(data, prov, city);
+    setHint(`匹配结果：${list.length} 条`);
     renderResults(list);
-    setCount(list.length);
   }
 
-  provinceSel.addEventListener('change', ()=>{ refreshCities(); refresh(); });
-  citySel.addEventListener('change', refresh);
-  qInput.addEventListener('input', refresh);
+  provinceInput.addEventListener('input', ()=>{ refreshCities(); });
+  provinceInput.addEventListener('change', ()=>{ refreshCities(); });
+
+  searchBtn.addEventListener('click', runSearch);
   resetBtn.addEventListener('click', ()=>{
-    provinceSel.value='';
-    qInput.value='';
+    provinceInput.value='';
+    cityInput.value='';
     refreshCities();
-    citySel.value='';
-    refresh();
+    setHint('');
+    document.querySelector('#results').innerHTML='';
   });
 
+  // Enter to search
+  provinceInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') runSearch(); });
+  cityInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter') runSearch(); });
+
   refreshCities();
-  refresh();
 })();
